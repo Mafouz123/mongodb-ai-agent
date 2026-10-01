@@ -2,7 +2,7 @@
 
 Ce projet permet de charger de la documentation MongoDB dans MongoDB Atlas, de générer des embeddings avec Voyage AI, puis de poser des questions à un agent IA qui recherche dans la documentation grâce à la recherche vectorielle.
 
-Il est conçu pour être un projet pédagogique : il montre comment combiner :
+Il est conçu pour être un projet pédagogique et combine :
 - MongoDB Atlas
 - Hugging Face datasets
 - Voyage AI embeddings
@@ -32,10 +32,11 @@ Cela permet de créer une base de connaissances intelligente et exploitable par 
 Voici les fichiers principaux :
 
 - `data.py` : charge les données, les insère dans MongoDB et génère les embeddings.
-- `main.py` : crée le workflow LangGraph avec l’agent IA et les outils.
-- `key_param.py` : lit les clés API depuis les variables d'environnement (ce fichier reste local).
+- `main.py` : construit le workflow LangGraph, ses outils et son checkpoint MongoDB.
+- `streamlit_app.py` : fournit l’interface de chat et le formulaire de configuration des clés.
+- `key_param.py` : lit les variables d’environnement utilisées par le script de chargement des données (fichier local).
 - `key_param.example.py` : modèle de configuration sans secrets.
-- `pyproject.toml` : décrit les dépendances Python du projet.
+- `pyproject.toml` et `uv.lock` : décrivent et verrouillent les dépendances Python, dont Streamlit.
 
 ---
 
@@ -72,26 +73,15 @@ Cela crée l’environnement virtuel et installe les dépendances définies dans
 
 ## 5. Configuration des clés
 
-Crée un fichier local `key_param.py` à partir de `key_param.example.py`, puis définis ces variables d'environnement :
+L’interface Streamlit demande les trois identifiants dans des champs masqués; ils ne sont pas enregistrés sur disque. Pour charger les données ou lancer le script CLI, configure les variables d’environnement suivantes. `data.py` les lit via `key_param.py` :
 
-```python
-MONGODB_URI="..."
-GROQ_API_KEY="..."
-VOYAGE_API_KEY="..."
+```powershell
+$env:MONGODB_URI = "mongodb+srv://..."
+$env:GROQ_API_KEY = "..."
+$env:VOYAGE_API_KEY = "..."
 ```
 
-Remplace ces valeurs par les tiennes.
-
-Important :
-- `mongodb_uri` doit être une URL MongoDB Atlas valide.
-- `groq_api_key` doit être une clé active Groq.
-- `voyage_api_key` doit être une clé active Voyage AI.
-
-Voici un exemple de format de `mongodb_uri` :
-
-```python
-mongodb_uri = "mongodb+srv://<username>:<password>@<cluster>.mongodb.net/?retryWrites=true&w=majority"
-```
+Ces commandes PowerShell ne configurent les valeurs que pour le terminal courant. `MONGODB_URI` doit autoriser l’accès au cluster Atlas; les clés Groq et Voyage AI doivent être actives. Ne publie jamais ces valeurs.
 
 ---
 
@@ -108,7 +98,7 @@ uv run data.py
 Ce script va :
 1. Charger les jeux de données MongoDB depuis Hugging Face.
 2. Se connecter à MongoDB Atlas.
-3. Vider les collections `full_docs` et `chunked_docs`.
+3. Vider les collections `full_docs` et `chunked_docs` avant de les recharger.
 4. Insérer les documents complets.
 5. Générer les embeddings avec Voyage AI.
 6. Insérer les morceaux de documents avec leurs vecteurs.
@@ -126,7 +116,7 @@ Si tout marche bien, tu devrais voir des messages comme :
 
 ## 7. Lancer l’agent IA
 
-Le fichier `main.py` lance le workflow LangGraph.
+Le fichier `main.py` lance le workflow LangGraph en mode terminal et utilise les variables d’environnement.
 
 Exécute :
 
@@ -149,6 +139,18 @@ Quelles sont les bonnes pratiques pour les sauvegardes MongoDB ?
 
 L’agent répond ensuite en s’appuyant sur les chunks de documents trouvés dans MongoDB.
 
+### Tester avec l’interface Streamlit
+
+```bash
+uv run streamlit run streamlit_app.py
+```
+
+Dans le panneau **Connexion**, saisis l’URI MongoDB et les clés Groq et Voyage AI, puis sélectionne **Vérifier les clés**. L’interface teste le ping MongoDB, l’accès à l’API Groq et un embedding Voyage AI. Le chat n’est activé que si les trois tests réussissent.
+
+Les valeurs sont masquées et conservées en mémoire pour la session Streamlit; elles ne sont écrites ni dans `key_param.py` ni sur disque. Après connexion, pose tes questions dans le champ de chat. Le bouton **Nouvelle conversation** crée un nouvel identifiant de fil; les conversations précédentes ne sont pas supprimées de MongoDB.
+
+Pour que les réponses documentaires fonctionnent, charge d’abord les données avec `data.py` et configure dans MongoDB Atlas l’index de recherche vectorielle `vector_index` sur `ai_agents.chunked_docs`, avec le champ `embedding`.
+
 ---
 
 ## 8. Comment fonctionne le projet ?
@@ -160,7 +162,7 @@ L’agent répond ensuite en s’appuyant sur les chunks de documents trouvés d
 On utilise Voyage AI pour convertir les textes en vecteurs numériques. Ces vecteurs permettent la recherche sémantique.
 
 ### Partie 3 : recherche vectorielle
-Dans `main.py`, la fonction `get_information_for_question_answering()` :
+Dans `main.py`, l’outil `get_information_for_question_answering` :
 - transforme la question en embedding
 - cherche les meilleurs documents proches dans MongoDB
 - renvoie les résultats au LLM
@@ -188,7 +190,7 @@ Ces outils permettent à l’agent d’aller chercher des données concrètes av
 
 ### Problème : mauvaise connexion MongoDB
 Vérifie :
-- l’URL dans `key_param.py`
+- l’URI saisie dans l’interface ou la variable `MONGODB_URI` pour le CLI
 - le mot de passe Atlas
 - les permissions sur le cluster
 - le nom de la base et des collections
@@ -209,17 +211,18 @@ Relance :
 uv sync
 ```
 
+### Problème : un contrôle de clé échoue dans Streamlit
+
+Le panneau Connexion affiche le résultat séparément pour MongoDB, Groq et Voyage AI. Vérifie le service correspondant, puis saisis de nouveau les trois valeurs et relance **Vérifier les clés**. Les champs ne sont pas préremplis depuis les variables d’environnement.
+
 ---
 
-## 11. Bonnes pratiques pour continuer
+## 11. Sécurité et fonctionnement des sessions
 
-Pour apprendre et améliorer le projet :
-
-- crée un fichier `.env` pour stocker les clés
-- ajout un `.gitignore` pour ne pas publier les clés
-- ajoute une gestion des logs
-- ajoute une interface web ou CLI
-- ajoute un test de base pour vérifier les outils
+- Ne partage pas les URI ni les clés API et ne les ajoute pas au dépôt.
+- L’interface masque les champs de saisie et garde les identifiants dans la mémoire de la session Streamlit.
+- La mémoire de conversation LangGraph est stockée dans MongoDB grâce au checkpoint; **Nouvelle conversation** crée un autre fil sans effacer les précédents.
+- Les appels de recherche utilisent Voyage AI pour l’embedding et MongoDB Atlas Vector Search pour retrouver les documents.
 
 ---
 
@@ -230,7 +233,8 @@ Ce projet montre comment construire un assistant IA sur la documentation MongoDB
 - embeddings vectoriels
 - recherche sémantique
 - agent IA avec LangGraph
-- mémorisation de session
+- mémoire de conversation persistée dans MongoDB
+- interface Streamlit avec vérification des clés
 
 C’est un très bon exemple pour comprendre la synergie entre :
 - base de données
@@ -244,7 +248,6 @@ C’est un très bon exemple pour comprendre la synergie entre :
 Tu peux ensuite étendre le projet en :
 - ajoutant plus de sources de documentation
 - supportant plusieurs langues
-- ajoutant une interface pour interroger l’agent
 - ajoutant l’authentification utilisateur
 - alimentant la base avec plus de documents
 
@@ -269,6 +272,7 @@ Si tu suis les étapes ci-dessus, tu vas rapidement comprendre comment :
 uv sync
 uv run data.py
 uv run main.py
+uv run streamlit run streamlit_app.py
 ```
 
 ---
